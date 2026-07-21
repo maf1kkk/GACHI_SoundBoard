@@ -76,7 +76,6 @@ def play_sound(fp, vol=80, device=None):
                         return
             except: pass
         threading.Thread(target=_p,daemon=True).start()
-        return
     with alias_lock:
         alias_counter+=1; a=f"p{alias_counter%99999}"
     def _m():
