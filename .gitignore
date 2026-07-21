@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.spec
+build/
+streamer_config.json
+gen_streamer.py
+check_streamer.py
+test_*.py
+VBCABLE_Setup_x64.exe
