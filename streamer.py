@@ -8,14 +8,39 @@ else: BASE_DIR = Path(__file__).parent
 SOUNDS_DIR = BASE_DIR / "sounds"
 CONFIG_FILE = BASE_DIR / "streamer_config.json"
 
-DEFAULT_CONFIG = {"volume":80,"timer_enabled":True,"timer_min":5,"timer_max":15,"autostart":False,"hotkey_mode":True,"sound_hotkeys":{},"output_device":"default","mic_mode":False,"mic_gain":200}
+DEFAULT_CONFIG = {"theme":"light","volume":80,"timer_enabled":True,"timer_min":5,"timer_max":15,"autostart":False,"hotkey_mode":True,"sound_hotkeys":{},"output_device":"default","mic_mode":False,"mic_gain":200}
 
 MCI = ctypes.WinDLL("winmm")
 MCI.mciSendStringW.argtypes = [ctypes.wintypes.LPCWSTR, ctypes.wintypes.LPWSTR, ctypes.wintypes.UINT, ctypes.wintypes.HANDLE]
 MCI.mciSendStringW.restype = ctypes.wintypes.DWORD
 alias_counter = 0; alias_lock = threading.Lock()
 
-SOUND_COLORS = ["#FF6B6B","#4ECDC4","#45B7D1","#96CEB4","#FFEAA7","#DDA0DD","#98D8C8","#F7DC6F","#BB8FCE","#85C1E9","#F0B27A","#82E0AA","#F1948A","#85929E","#73C6B6","#E59866","#5DADE2","#AF7AC5","#48C9B0","#F5B7B1"]
+LIGHT = {
+    "bg": "#faf8f5", "bg2": "#ffffff", "bg3": "#f5f2ed",
+    "accent": "#007b83", "accent_hover": "#00666d",
+    "text": "#2d2a26", "muted": "#6b655d",
+    "border": "#e8e0d8", "border_accent": "#d4ccc3",
+    "success": "#2e7d32", "danger": "#c62828",
+    "sound": ["#007b83","#5a8a8c","#8a6e8c","#b8864e"],
+    "scrollbar": "#c4bcb3", "scrollbar_hover": "#a49c93",
+}
+
+DARK = {
+    "bg": "#0a0a0a", "bg2": "#161616", "bg3": "#1e1e1e",
+    "accent": "#00cc88", "accent_hover": "#00aa6e",
+    "text": "#e0e0e0", "muted": "#888888",
+    "border": "#2a2a2a", "border_accent": "#3a3a3a",
+    "success": "#2e7d32", "danger": "#ef5350",
+    "sound": ["#00cc88","#4ea8aa","#b388cc","#d4995e"],
+    "scrollbar": "#3a3a3a", "scrollbar_hover": "#555555",
+}
+
+FONT_MAIN = ("Segoe UI", 10)
+FONT_BOLD = ("Segoe UI", 10, "bold")
+FONT_HEADER = ("Segoe UI", 16, "bold")
+FONT_SMALL = ("Segoe UI", 9)
+FONT_BTN = ("Segoe UI", 9, "bold")
+
 PRIORITY_KW = ["aagh","aah","ahh","augh","cum","spank","slap","orgasm","moan","yeah","fuck","shit","oh","ah","ugh","groan","scream","penetration","1a","2a","3a","4a","1ag"]
 
 def sound_weight(p):
@@ -83,23 +108,17 @@ def play_sound(fp, vol=80, device=None, gain=200):
         def _p():
             try:
                 w = _to_wav(fp)
-                if not w:
-                    log_sd(f"wav conv failed: {fp}")
-                    return
+                if not w: return
                 d, sr = sf.read(w)
-                gain_f = max(0.5, min(5.0, gain/100)) * (vol/100)
-                d = d * gain_f
+                gf = max(0.5, min(5.0, gain/100)) * (vol/100)
+                d = d * gf
                 mx = float(abs(d).max()) or 1.0
                 if mx > 1.0: d = d / mx
-                devs = list_output_devs()
-                for i,n in devs:
+                for i,n in list_output_devs():
                     if n==device:
                         with _sd_stream_lock:
-                            sd.stop()
-                            sd.play(d, sr, device=i)
-                        log_sd(f"played '{Path(fp).name}' -> '{n}' idx={i}")
+                            sd.stop(); sd.play(d, sr, device=i)
                         return
-                log_sd(f"device '{device}' not found in: {[x[1] for x in devs]}")
             except Exception as e:
                 log_sd(f"ERR: {e}")
         threading.Thread(target=_p,daemon=True).start()
@@ -115,80 +134,126 @@ def play_sound(fp, vol=80, device=None, gain=200):
         except: pass
     threading.Thread(target=_m,daemon=True).start()
 
+class Theme:
+    def __init__(s, root, cfg):
+        s.root = root
+        s.cfg = cfg
+        s.t = LIGHT if cfg.get("theme","light")=="light" else DARK
+
+    def toggle(s):
+        new_theme = "dark" if s.t is LIGHT else "light"
+        s.cfg["theme"] = new_theme
+        s.t = LIGHT if new_theme=="light" else DARK
+        with open(CONFIG_FILE,"w",encoding="utf-8") as f:
+            json.dump(s.cfg,f,indent=2,ensure_ascii=False)
+        s._apply()
+
+    def _apply(s):
+        t = s.t
+        ctk.set_appearance_mode("light" if t is LIGHT else "dark")
+        theme_color = "green" if t is LIGHT else "green"
+        s.root.configure(fg_color=t["bg"])
+        for w in s.root.winfo_children():
+            s._recolor(w)
+        for w in s.settings_widgets if hasattr(s,"settings_widgets") else []:
+            s._recolor(w)
+
+    def _recolor(s, w):
+        try:
+            if hasattr(w,"configure"):
+                cls = w.__class__.__name__
+                if cls=="CTkFrame" or cls=="CTkScrollableFrame":
+                    fg = w.cget("fg_color")
+                    if fg and fg not in ("transparent","#0a0a0a","#0d0d0d","#141414","#faf8f5","#ffffff","#f5f2ed"):
+                        try: w.configure(fg_color=s.t["bg2"])
+                        except: pass
+        except: pass
+
+
+
 class SettingsWin(ctk.CTkToplevel):
-    def __init__(s,parent,cfg,sounds,on_save):
+    def __init__(s,parent,cfg,sounds,on_save,theme):
         super().__init__(parent)
-        s.cfg=cfg; s.sounds=sounds; s.on_save=on_save; s._hook=None; s.listening=-1
-        s.title("Settings"); s.geometry("520x600"); s.resizable(False,False)
-        s.transient(parent); s.grab_set(); s._ui()
+        s.cfg=cfg; s.sounds=sounds; s.on_save=on_save; s.theme=theme; s._hook=None; s.listening=-1
+        s.title("Settings"); s.geometry("560x640"); s.resizable(False,False)
+        s.transient(parent); s.grab_set()
+        s.configure(fg_color=theme.t["bg"])
+        s._ui()
 
     def _ui(s):
-        m=ctk.CTkScrollableFrame(s,fg_color="transparent"); m.pack(fill="both",expand=True,padx=12,pady=12)
-        ctk.CTkLabel(m,text="Hotkey Bindings",font=("Segoe UI",15,"bold"),anchor="w").pack(fill="x",pady=(0,8))
+        t = s.theme.t
+        outer = ctk.CTkFrame(s, fg_color=t["bg2"], border_color=t["accent"], border_width=1)
+        outer.pack(fill="both",expand=True,padx=8,pady=8)
+        m=ctk.CTkScrollableFrame(outer,fg_color=t["bg2"],
+            scrollbar_button_color=t["scrollbar"], scrollbar_button_hover_color=t["scrollbar_hover"])
+        m.pack(fill="both",expand=True,padx=6,pady=6)
+        ctk.CTkLabel(m,text="Hotkey Bindings",font=FONT_HEADER,text_color=t["accent"]).pack(anchor="w",pady=(0,8))
         f=ctk.CTkFrame(m,fg_color="transparent"); f.pack(fill="x")
-        ctk.CTkLabel(f,text="Sound",font=("Segoe UI",11,"bold"),width=190,anchor="w").grid(row=0,column=0,padx=(0,8))
-        ctk.CTkLabel(f,text="Hotkey",font=("Segoe UI",11,"bold"),width=140,anchor="w").grid(row=0,column=1,padx=(0,8))
+        ctk.CTkLabel(f,text="Sound",font=FONT_BOLD,text_color=t["accent"],width=190,anchor="w").grid(row=0,column=0,padx=(0,8))
+        ctk.CTkLabel(f,text="Key",font=FONT_BOLD,text_color=t["accent"],width=140,anchor="w").grid(row=0,column=1,padx=(0,8))
         s.entries=[]
         for i,snd in enumerate(s.sounds[:24]):
             nm=snd.stem[:18]
             if len(snd.stem)>18: nm+=".."
-            ctk.CTkLabel(f,text=nm,width=190,anchor="w").grid(row=i+1,column=0,padx=(0,8),pady=1,sticky="w")
+            ctk.CTkLabel(f,text=nm,font=FONT_MAIN,text_color=t["text"],width=190,anchor="w").grid(row=i+1,column=0,padx=(0,8),pady=1,sticky="w")
             hk=s.cfg["sound_hotkeys"].get(snd.name,"")
-            e=ctk.CTkEntry(f,width=140,placeholder_text="click to bind")
+            e=ctk.CTkEntry(f,width=140,placeholder_text="click to bind",fg_color=t["bg3"],text_color=t["text"],border_color=t["border"],font=FONT_MAIN)
             e.insert(0,hk); e.grid(row=i+1,column=1,padx=(0,5),pady=1)
             e.bind("<Button-1>",lambda _,idx=i: s._start_listen(idx))
             s.entries.append(e)
-            ctk.CTkButton(f,text="X",width=28,fg_color="transparent",hover_color="#FF4444",command=lambda idx=i: s._clear(idx)).grid(row=i+1,column=2,pady=1)
-        ctk.CTkLabel(m,text="Click entry, then press key to bind",font=("Segoe UI",10),text_color="gray").pack(anchor="w")
-        sep=ctk.CTkFrame(m,height=2,fg_color="#333"); sep.pack(fill="x",pady=10)
-        ctk.CTkLabel(m,text="Output Device",font=("Segoe UI",15,"bold"),anchor="w").pack(fill="x")
+            ctk.CTkButton(f,text="X",width=28,fg_color="transparent",hover_color=t["danger"],text_color=t["muted"],font=FONT_BOLD,command=lambda idx=i: s._clear(idx)).grid(row=i+1,column=2,pady=1)
+        ctk.CTkLabel(m,text="click entry, then press key",font=FONT_SMALL,text_color=t["muted"]).pack(anchor="w")
+        sep=ctk.CTkFrame(m,height=1,fg_color=t["border"]); sep.pack(fill="x",pady=10)
+        ctk.CTkLabel(m,text="Output Device",font=FONT_HEADER,text_color=t["accent"]).pack(anchor="w")
         devs=list_output_devs()
         names=["default (speakers)"]
         for _,n in devs: names.append(n)
         if not HAS_SD: names=["default (speakers) - sd/ffmpeg required"]
         s.dev_var=ctk.StringVar(value=s.cfg.get("output_device","default"))
-        dev_menu=ctk.CTkOptionMenu(m,values=names,variable=s.dev_var,width=400)
+        dev_menu=ctk.CTkOptionMenu(m,values=names,variable=s.dev_var,fg_color=t["bg3"],button_color=t["accent"],button_hover_color=t["accent_hover"],text_color=t["text"],dropdown_fg_color=t["bg2"],dropdown_hover_color=t["bg3"],dropdown_text_color=t["text"],font=FONT_MAIN)
         dev_menu.pack(anchor="w",pady=4)
         s.mic_var=ctk.BooleanVar(value=s.cfg.get("mic_mode",False))
         mic_frame=ctk.CTkFrame(m,fg_color="transparent"); mic_frame.pack(fill="x",pady=4)
-        sw=ctk.CTkSwitch(mic_frame,text="Play through microphone (Discord)",variable=s.mic_var); sw.pack(side="left")
+        sw=ctk.CTkSwitch(mic_frame,text="play through mic (discord)",variable=s.mic_var,fg_color=t["border"],progress_color=t["accent"],button_color=t["muted"],button_hover_color=t["accent"],font=FONT_MAIN)
+        sw.pack(side="left")
         if not HAS_SD:
-            ctk.CTkLabel(mic_frame,text="need ffmpeg + sounddevice",text_color="#FF6B6B",font=("Segoe UI",10)).pack(side="left",padx=10)
+            ctk.CTkLabel(mic_frame,text="need ffmpeg + sounddevice",text_color=t["danger"],font=FONT_SMALL).pack(side="left",padx=10)
         if not FFMPEG:
-            ctk.CTkLabel(m,text="ffmpeg not found - mic mode disabled. Install ffmpeg via 'choco install ffmpeg'",text_color="#FF6B6B",font=("Segoe UI",10)).pack(anchor="w")
+            ctk.CTkLabel(m,text="ffmpeg not found - mic mode disabled",text_color=t["danger"],font=FONT_SMALL).pack(anchor="w")
         gframe=ctk.CTkFrame(m,fg_color="transparent"); gframe.pack(fill="x",pady=4)
-        ctk.CTkLabel(gframe,text="Mic gain:",font=("Segoe UI",11)).pack(side="left",padx=(0,5))
+        ctk.CTkLabel(gframe,text="mic gain:",font=FONT_MAIN,text_color=t["text"]).pack(side="left",padx=(0,5))
         s.gain_var=ctk.IntVar(value=s.cfg.get("mic_gain",200))
-        gain_slider=ctk.CTkSlider(gframe,from_=50,to=500,width=200,variable=s.gain_var)
+        gain_slider=ctk.CTkSlider(gframe,from_=50,to=500,width=200,variable=s.gain_var,fg_color=t["border"],button_color=t["accent"],button_hover_color=t["accent_hover"],progress_color=t["accent"])
         gain_slider.pack(side="left",padx=(0,5))
-        s.gain_lbl=ctk.CTkLabel(gframe,text=f"{s.gain_var.get()}%",width=40)
+        s.gain_lbl=ctk.CTkLabel(gframe,text=f"{s.gain_var.get()}%",width=40,font=FONT_BOLD,text_color=t["accent"])
         s.gain_lbl.pack(side="left")
         gain_slider.configure(command=lambda v: s.gain_lbl.configure(text=f"{int(v)}%"))
-        sep2=ctk.CTkFrame(m,height=2,fg_color="#333"); sep2.pack(fill="x",pady=10)
-        ctk.CTkLabel(m,text="Random Timer",font=("Segoe UI",15,"bold"),anchor="w").pack(fill="x")
+        sep2=ctk.CTkFrame(m,height=1,fg_color=t["border"]); sep2.pack(fill="x",pady=10)
+        ctk.CTkLabel(m,text="Timer",font=FONT_HEADER,text_color=t["accent"]).pack(anchor="w")
         r1=ctk.CTkFrame(m,fg_color="transparent"); r1.pack(fill="x")
         s.tv=ctk.BooleanVar(value=s.cfg["timer_enabled"])
-        ctk.CTkSwitch(r1,text="Enabled",variable=s.tv).pack(side="left",padx=(0,15))
-        ctk.CTkLabel(r1,text="Every").pack(side="left")
+        ctk.CTkSwitch(r1,text="enabled",variable=s.tv,fg_color=t["border"],progress_color=t["accent"],button_color=t["muted"],button_hover_color=t["accent"],font=FONT_MAIN).pack(side="left",padx=(0,15))
+        ctk.CTkLabel(r1,text="every",font=FONT_MAIN,text_color=t["text"]).pack(side="left")
         s.tmin_v=ctk.StringVar(value=str(s.cfg["timer_min"]))
-        ctk.CTkEntry(r1,width=50,textvariable=s.tmin_v).pack(side="left",padx=5)
-        ctk.CTkLabel(r1,text="to").pack(side="left")
+        ctk.CTkEntry(r1,width=50,textvariable=s.tmin_v,fg_color=t["bg3"],text_color=t["text"],border_color=t["border"],font=FONT_MAIN).pack(side="left",padx=5)
+        ctk.CTkLabel(r1,text="to",font=FONT_MAIN,text_color=t["text"]).pack(side="left")
         s.tmax_v=ctk.StringVar(value=str(s.cfg["timer_max"]))
-        ctk.CTkEntry(r1,width=50,textvariable=s.tmax_v).pack(side="left",padx=5)
-        ctk.CTkLabel(r1,text="minutes").pack(side="left")
-        sep3=ctk.CTkFrame(m,height=2,fg_color="#333"); sep3.pack(fill="x",pady=10)
-        ctk.CTkLabel(m,text="Other",font=("Segoe UI",15,"bold"),anchor="w").pack(fill="x")
+        ctk.CTkEntry(r1,width=50,textvariable=s.tmax_v,fg_color=t["bg3"],text_color=t["text"],border_color=t["border"],font=FONT_MAIN).pack(side="left",padx=5)
+        ctk.CTkLabel(r1,text="minutes",font=FONT_MAIN,text_color=t["text"]).pack(side="left")
+        sep3=ctk.CTkFrame(m,height=1,fg_color=t["border"]); sep3.pack(fill="x",pady=10)
+        ctk.CTkLabel(m,text="Other",font=FONT_HEADER,text_color=t["accent"]).pack(anchor="w")
         s.asv=ctk.BooleanVar(value=s.cfg["autostart"])
-        ctk.CTkSwitch(m,text="Start with Windows",variable=s.asv).pack(anchor="w",pady=2)
+        ctk.CTkSwitch(m,text="start with windows",variable=s.asv,fg_color=t["border"],progress_color=t["accent"],button_color=t["muted"],button_hover_color=t["accent"],font=FONT_MAIN).pack(anchor="w",pady=2)
         s.hmv=ctk.BooleanVar(value=s.cfg["hotkey_mode"])
-        ctk.CTkSwitch(m,text="Enable background hotkeys",variable=s.hmv).pack(anchor="w",pady=2)
-        bf=ctk.CTkFrame(s,fg_color="transparent"); bf.pack(fill="x",padx=12,pady=10)
-        ctk.CTkButton(bf,text="Save",fg_color="#2e7d32",hover_color="#1b5e20",command=s._save).pack(side="right",padx=5)
-        ctk.CTkButton(bf,text="Cancel",command=s.destroy).pack(side="right")
+        ctk.CTkSwitch(m,text="enable background hotkeys",variable=s.hmv,fg_color=t["border"],progress_color=t["accent"],button_color=t["muted"],button_hover_color=t["accent"],font=FONT_MAIN).pack(anchor="w",pady=2)
+        bf=ctk.CTkFrame(s,fg_color=t["bg"]); bf.pack(fill="x",padx=8,pady=(0,8))
+        ctk.CTkButton(bf,text="Save",fg_color=t["success"],text_color="#fff",font=FONT_BOLD,hover_color="#1b5e20",command=s._save).pack(side="right",padx=5)
+        ctk.CTkButton(bf,text="Cancel",fg_color=t["bg3"],text_color=t["muted"],font=FONT_BOLD,border_color=t["border"],border_width=1,hover_color=t["danger"],command=s.destroy).pack(side="right")
 
     def _start_listen(s,idx):
-        if s.listening>=0: s.entries[s.listening].configure(fg_color="white")
-        s.listening=idx; e=s.entries[idx]; e.delete(0,"end"); e.insert(0,"press a key..."); e.configure(fg_color="#FFF3CD")
+        t = s.theme.t
+        if s.listening>=0: s.entries[s.listening].configure(fg_color=t["bg3"])
+        s.listening=idx; e=s.entries[idx]; e.delete(0,"end"); e.insert(0,"press a key..."); e.configure(fg_color=t["accent_hover"], text_color="#fff")
         s._hook=keyboard.hook(lambda ev,i=idx: s._capture(ev,i))
 
     def _capture(s,ev,idx):
@@ -198,8 +263,9 @@ class SettingsWin(ctk.CTkToplevel):
             s.after(0,lambda: s._set(idx,ev.name))
 
     def _set(s,idx,k):
+        t = s.theme.t
         if s.listening==idx:
-            e=s.entries[idx]; e.delete(0,"end"); e.insert(0,k); e.configure(fg_color="white"); s.listening=-1
+            e=s.entries[idx]; e.delete(0,"end"); e.insert(0,k); e.configure(fg_color=t["bg3"],text_color=t["text"]); s.listening=-1
 
     def _clear(s,idx):
         s.entries[idx].delete(0,"end")
@@ -238,51 +304,113 @@ class SoundBoardApp:
         s._setup_win(); s._build_ui(); s._reg_hk(); s._start_timer(); s._autostart()
 
     def _setup_win(s):
-        ctk.set_appearance_mode("dark"); ctk.set_default_color_theme("green")
-        s.root=ctk.CTk(); s.root.title("SoundBoard"); s.root.geometry("700+500"); s.root.minsize(600,400)
+        ctk.set_appearance_mode("light" if s.cfg.get("theme","light")=="light" else "dark")
+        s.root=ctk.CTk(); s.root.title("SoundBoard"); s.root.geometry("780x560"); s.root.minsize(680,440)
+        t = LIGHT if s.cfg.get("theme","light")=="light" else DARK
+        s.root.configure(fg_color=t["bg"])
+        s.theme = Theme(s.root, s.cfg)
 
     def _build_ui(s):
-        s.root.grid_columnconfigure(0,weight=1); s.root.grid_rowconfigure(1,weight=1)
-        h=ctk.CTkFrame(s.root,fg_color="transparent",height=50); h.grid(row=0,column=0,padx=15,pady=(10,0),sticky="ew")
+        t = s.theme.t
+        s.root.grid_columnconfigure(0,weight=1); s.root.grid_rowconfigure(0,weight=1)
+
+        card = ctk.CTkFrame(s.root, fg_color=t["bg2"], border_color=t["border"], border_width=1, corner_radius=6)
+        card.grid(row=0,column=0,padx=12,pady=12,sticky="nsew")
+        card.grid_columnconfigure(0,weight=1); card.grid_rowconfigure(2,weight=1)
+
+        h=ctk.CTkFrame(card,fg_color=t["bg2"],height=42, corner_radius=0)
+        h.grid(row=0,column=0,padx=6,pady=(6,0),sticky="ew")
         h.grid_columnconfigure(0,weight=1)
-        ctk.CTkLabel(h,text="\U0001f399 SoundBoard",font=("Segoe UI",22,"bold")).pack(side="left")
-        s.mode_label=ctk.CTkLabel(h,text="",font=("Segoe UI",11),text_color="gray")
-        s.mode_label.pack(side="right",padx=(0,10))
-        s.timer_label=ctk.CTkLabel(h,text="",font=("Segoe UI",11),text_color="gray")
-        s.timer_label.pack(side="right",padx=(0,10))
-        ctk.CTkButton(h,text="\u2699 Settings",width=80,command=s._settings).pack(side="right",padx=(0,5))
-        sc=ctk.CTkScrollableFrame(s.root,fg_color="transparent"); sc.grid(row=1,column=0,padx=15,pady=10,sticky="nsew")
+        ctk.CTkLabel(h,text="SoundBoard",font=FONT_HEADER,text_color=t["accent"]).pack(side="left")
+        s.mode_label=ctk.CTkLabel(h,text="",font=FONT_SMALL,text_color=t["accent"])
+        s.mode_label.pack(side="right",padx=(0,8))
+        s.timer_label=ctk.CTkLabel(h,text="",font=FONT_SMALL,text_color=t["muted"])
+        s.timer_label.pack(side="right",padx=(0,8))
+
+        ctk.CTkButton(h,text="\u2630",font=("Segoe UI",14),fg_color="transparent",text_color=t["muted"],
+            hover_color=t["bg3"],width=32,height=28,command=s._settings).pack(side="right",padx=(0,4))
+        s.theme_btn=ctk.CTkButton(h,text="\u263e",font=("Segoe UI",14),fg_color="transparent",text_color=t["muted"],
+            hover_color=t["bg3"],width=32,height=28,command=s._toggle_theme)
+        s.theme_btn.pack(side="right")
+
+        sc=ctk.CTkScrollableFrame(card,fg_color=t["bg2"],
+            scrollbar_button_color=t["scrollbar"], scrollbar_button_hover_color=t["scrollbar_hover"], corner_radius=0)
+        sc.grid(row=2,column=0,padx=6,pady=4,sticky="nsew")
         g=ctk.CTkFrame(sc,fg_color="transparent"); g.pack(fill="both",expand=True)
         for i,snd in enumerate(s.sounds):
-            r=i//4; c=i%4; col=SOUND_COLORS[i%len(SOUND_COLORS)]; nm=snd.stem[:14]
-            if len(snd.stem)>14: nm+=".."
-            b=ctk.CTkButton(g,text=nm,fg_color=col,hover_color="#333",text_color="#000",font=("Segoe UI",11,"bold"),width=130,height=50,anchor="center",command=lambda snd=snd: s._play(snd))
+            r=i//4; c=i%4
+            col = t["sound"][i % len(t["sound"])]
+            nm=snd.stem[:18]
+            if len(snd.stem)>18: nm+=".."
+            b=ctk.CTkButton(g,text=nm,fg_color=t["bg3"],text_color=t["text"],
+                hover_color=t["bg2"],font=FONT_BTN,
+                border_color=col, border_width=1,
+                width=125,height=44,anchor="center",
+                command=lambda snd=snd: s._play(snd))
+            b.sound_path = snd
             b.grid(row=r,column=c,padx=4,pady=4,sticky="ew")
             g.grid_columnconfigure(c,weight=1,uniform="b")
             s.buttons.append(b)
-        cb=ctk.CTkFrame(s.root,fg_color="transparent",height=60); cb.grid(row=2,column=0,padx=15,pady=(0,10),sticky="ew")
+
+        cb=ctk.CTkFrame(card,fg_color=t["bg2"],height=44, corner_radius=0)
+        cb.grid(row=3,column=0,padx=6,pady=(0,2),sticky="ew")
         cb.grid_columnconfigure(2,weight=1)
-        ctk.CTkButton(cb,text="\U0001f3b2 Random",width=100,fg_color="#6C3483",hover_color="#512E5F",command=s._random).grid(row=0,column=0,padx=(0,10))
-        ctk.CTkLabel(cb,text="Vol:").grid(row=0,column=1,padx=(0,5))
-        s.slider=ctk.CTkSlider(cb,from_=0,to=100,width=120,command=s._vol)
-        s.slider.set(s.vol); s.slider.grid(row=0,column=2,padx=(0,10),sticky="ew")
-        s.vol_lbl=ctk.CTkLabel(cb,text=f"{s.vol}%",width=35)
-        s.vol_lbl.grid(row=0,column=3,padx=(0,15))
-        s.timer_sw=ctk.CTkSwitch(cb,text="Timer",command=s._toggle_timer)
+        ctk.CTkButton(cb,text="Random",width=80,height=28,fg_color=t["accent"],text_color="#fff",
+            font=FONT_BOLD,hover_color=t["accent_hover"],command=s._random).grid(row=0,column=0,padx=(0,8))
+        ctk.CTkLabel(cb,text="Vol",font=FONT_MAIN,text_color=t["muted"]).grid(row=0,column=1,padx=(0,5))
+        s.slider=ctk.CTkSlider(cb,from_=0,to=100,width=100,fg_color=t["border"],
+            button_color=t["accent"],button_hover_color=t["accent_hover"],progress_color=t["accent"],command=s._vol)
+        s.slider.set(s.vol); s.slider.grid(row=0,column=2,padx=(0,8),sticky="ew")
+        s.vol_lbl=ctk.CTkLabel(cb,text=f"{s.vol}%",width=32,font=FONT_BOLD,text_color=t["accent"])
+        s.vol_lbl.grid(row=0,column=3,padx=(0,10))
+        s.timer_sw=ctk.CTkSwitch(cb,text="Timer",font=FONT_SMALL,fg_color=t["border"],progress_color=t["accent"],
+            button_color=t["muted"],button_hover_color=t["accent"],command=s._toggle_timer)
         s.timer_sw.grid(row=0,column=4)
-        st=ctk.CTkFrame(s.root,fg_color="transparent",height=25); st.grid(row=3,column=0,padx=15,pady=(0,5),sticky="ew")
+
+        st=ctk.CTkFrame(card,fg_color=t["bg2"],height=20, corner_radius=0)
+        st.grid(row=4,column=0,padx=6,pady=(0,6),sticky="ew")
         st.grid_columnconfigure(0,weight=1)
-        s.status=ctk.CTkLabel(st,text="",font=("Segoe UI",10),text_color="gray",anchor="w")
+        s.status=ctk.CTkLabel(st,text="",font=FONT_SMALL,text_color=t["muted"],anchor="w")
         s.status.grid(row=0,column=0,sticky="w")
         s._update_status()
+
+    def _toggle_theme(s):
+        s.theme.toggle()
+        t = s.theme.t
+        s.root.configure(fg_color=t["bg"])
+        s._rebuild_ui()
+
+    def _rebuild_ui(s):
+        for w in s.root.winfo_children():
+            w.destroy()
+        s.buttons=[]
+        s._build_ui()
+
+    def _blend(s, c1, c2, t):
+        c1 = (int(c1[1:3],16), int(c1[3:5],16), int(c1[5:7],16))
+        c2 = (int(c2[1:3],16), int(c2[3:5],16), int(c2[5:7],16))
+        r = int(c1[0]*(1-t) + c2[0]*t)
+        g = int(c1[1]*(1-t) + c2[1]*t)
+        b = int(c1[2]*(1-t) + c2[2]*t)
+        return f"#{r:02x}{g:02x}{b:02x}"
 
     def _play(s,snd):
         dev = s.cfg.get("output_device") if s.cfg.get("output_device") != "default" and s.cfg.get("mic_mode") else None
         play_sound(str(snd),s.vol,dev,s.cfg.get("mic_gain",200))
+        t = s.theme.t
         for b in s.buttons:
-            nm=snd.stem[:14]; nm2=nm+".."
-            if b.cget("text")==nm or b.cget("text")==nm2:
-                o=b.cget("fg_color"); b.configure(fg_color="#FFF"); s.root.after(150,lambda bb=b,oo=o: bb.configure(fg_color=oo)); break
+            if getattr(b, "sound_path", None) != snd:
+                continue
+            try:
+                accent = b.cget("border_color")
+                bg = t["bg3"]
+                b.configure(fg_color=accent, text_color="#fff")
+                s.root.after(50, lambda bb=b, a=accent, bg=bg: bb.configure(fg_color=s._blend(a, bg, 0.4), text_color=t["muted"]))
+                s.root.after(110, lambda bb=b, a=accent, bg=bg: bb.configure(fg_color=s._blend(a, bg, 0.7), text_color=t["text"]))
+                s.root.after(190, lambda bb=b, a=accent, bg=bg: bb.configure(fg_color=s._blend(a, bg, 0.9), text_color=t["text"]))
+                s.root.after(280, lambda bb=b, bg=bg: bb.configure(fg_color=bg, text_color=t["text"]))
+            except: pass
+            break
 
     def _random(s):
         if not s.sounds: return
@@ -337,11 +465,11 @@ class SoundBoardApp:
 
     def _update_status(s):
         hk=len(s.cfg["sound_hotkeys"]); sn=len(s.sounds); tm="timer on" if s.cfg["timer_enabled"] else "timer off"
-        dev=s.cfg.get("output_device") if s.cfg.get("mic_mode") and s.cfg.get("output_device")!="default" else "speakers"
+        dev=s.cfg.get("output_device") if s.cfg.get("mic_mode") and s.cfg.get("output_device")!="default" else "speaker"
         s.status.configure(text=f"{sn} sounds | {hk} hotkeys | {tm} | output: {dev}")
-        s.mode_label.configure(text="\U0001f3a4 mic mode" if s.cfg.get("mic_mode") and s.cfg.get("output_device")!="default" else "")
+        s.mode_label.configure(text="mic" if s.cfg.get("mic_mode") and s.cfg.get("output_device")!="default" else "")
 
-    def _settings(s): SettingsWin(s.root,s.cfg,s.sounds,s._on_save)
+    def _settings(s): SettingsWin(s.root,s.cfg,s.sounds,s._on_save,s.theme)
 
     def _on_save(s,cfg):
         s.cfg=cfg; s.vol=s.cfg["volume"]; s.slider.set(s.vol); s.vol_lbl.configure(text=f"{s.vol}%"); s._update_status()
@@ -352,7 +480,8 @@ class SoundBoardApp:
         s._autostart()
 
     def run(s):
-        s.root.protocol("WM_DELETE_WINDOW",s._close); s.root.mainloop()
+        s.root.protocol("WM_DELETE_WINDOW",s._close)
+        s.root.mainloop()
 
     def _close(s):
         s.timer_active=False
@@ -364,4 +493,11 @@ class SoundBoardApp:
         except: pass
         os._exit(0)
 
-if __name__=="__main__": SoundBoardApp().run()
+if __name__=="__main__":
+    try:
+        SoundBoardApp().run()
+    except Exception as e:
+        import traceback
+        err_log = Path(tempfile.gettempdir())/"sndb_crash.log"
+        with open(err_log,"w",encoding="utf-8") as f:
+            f.write(f"{e}\n{traceback.format_exc()}")
