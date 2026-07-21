@@ -1,88 +1,74 @@
-# 🎙️ GACHI SoundBoard — Streamer Soundboard
+# GACHI SoundBoard
 
-> **Soundpad for streamers.** Weighted random GachiMuchi sounds, hotkey bindings, timer, and simultaneous output to speakers + Discord/voice chat via VB-CABLE.
+Desktop soundboard for streamers with weighted random sound selection, hotkey bindings, timer, and audio routing to Discord/OBS via virtual audio cable.
 
-![SoundBoard](screenshot.png)
+## Features
 
-## ✨ Features
+- 300+ GachiMuchi sounds with weighted random selection (short/funny sounds 3x more likely)
+- Audio routing to Discord microphone via VB-CABLE virtual audio driver
+- Capture as separate audio source in OBS (Audio Input Capture -> CABLE Output)
+- Hotkey bindings for each sound, works in background
+- Random timer with configurable interval
+- Mic gain control (50-500%) for volume adjustment
+- Simultaneous output to speakers + Discord mic
+- Dark theme UI
 
-- **300+ GachiMuchi sounds** — weighted random (short/funny sounds 3× more likely)
-- **Soundpad-style mic injection** — plays through speakers AND your Discord microphone simultaneously via [VB-CABLE](https://vb-audio.com/Cable/)
-- **OBS-ready** — capture as separate audio source (Audio Input Capture → `CABLE Output`)
-- **Hotkey bindings** — bind any key to any sound, works in background
-- **Random timer** — auto-plays sounds at configurable intervals
-- **Sound samples** — 20+ short sounds included (<5s each)
-- **Dark theme** — customtkinter modern UI
+## Quick Start
 
-## 🚀 Quick Start
+### For streaming (Discord + OBS)
 
-### For streaming (Discord + OBS viewers):
+1. Install [VB-CABLE](https://vb-audio.com/Cable/) (free virtual audio driver, requires reboot)
+2. Download `SoundBoard.exe` and place it next to a `sounds/` folder with MP3/WAV files
+3. In SoundBoard -> Settings -> select `CABLE Input` as output device -> enable "Play through microphone"
+4. Set Mic Gain to 200-300% if sound is too quiet
+5. In Discord -> Voice & Video -> Input Device -> `CABLE Output`
+6. In OBS -> add Audio Input Capture -> `CABLE Output` -> route to Stream only
 
-1. Install [VB-CABLE](https://vb-audio.com/Cable/) (free virtual audio driver)
-2. Download `SoundBoard.exe` from Releases, put it with `sounds/` folder
-3. **In SoundBoard** → Settings → select `CABLE Input` as Output Device → enable "Play through microphone"
-4. **In Discord** → Voice & Video → Input Device → `CABLE Output` (set once, friends hear sounds)
-5. **In OBS** → add Audio Input Capture → `CABLE Output` → route to "Stream" only → viewers hear sounds separately
-6. You hear sounds through speakers — everyone wins
+Sound now plays simultaneously through your speakers and the virtual cable. You hear it, Discord friends hear it, OBS viewers hear it as a separate audio track.
 
-> **Simultaneous output**: SoundBoard now plays through BOTH your speakers (you hear it) AND the CABLE device (Discord friends + OBS viewers hear it).
+### For casual use
 
-### For casual use (speakers only):
+Run `SoundBoard.exe` with mic mode disabled. Sounds play through speakers only.
 
-Just run `SoundBoard.exe` — sounds play through speakers. Mic mode off.
-
-## 🎮 Controls
+## Controls
 
 | Control | Action |
 |---------|--------|
-| Click button | Play sound |
-| `🎲 Random` | Play random weighted sound |
-| Volume slider | Global volume |
-| Timer switch | Auto-play random sounds |
-| `⚙ Settings` | Bind hotkeys, select output device, mic mode |
+| Sound button | Play sound |
+| Random button | Play random weighted sound |
+| Volume slider | Global playback volume |
+| Timer switch | Enable/disable auto-play |
+| Settings button | Hotkey bindings, output device, mic mode, gain |
 
-## 🏗️ Build from Source
+## Audio Routing
+
+```
+SoundBoard --+--> Speakers (local)
+             |
+             +--> CABLE Input -> CABLE Output --+--> Discord (friends)
+                                                |
+                                                +--> OBS (viewers)
+```
+
+## Build from Source
 
 ```bash
 pip install -r requirements.txt
 pyinstaller --onefile --windowed --name SoundBoard --hidden-import sounddevice --hidden-import soundfile --hidden-import _soundfile streamer.py
 ```
 
-## 📋 Requirements
+## Requirements
 
-- **Windows 10/11**
-- **Python 3.10+** (to build)
-- **ffmpeg** (for mic mode, `choco install ffmpeg`)
-- **VB-CABLE** (for Discord/OBS mic routing)
-- **sounddevice + soundfile** (auto-detected if ffmpeg present)
+- Windows 10/11
+- Python 3.10+ (to build)
+- ffmpeg (for mic mode, `choco install ffmpeg`)
+- VB-CABLE (for Discord/OBS audio routing)
+- sounddevice + soundfile (auto-detected if ffmpeg present)
 
-## 🔊 Audio Routing Diagram
+## Demo
 
-```
-SoundBoard ──┬──► Speakers (you hear it)
-             │
-             └──► CABLE Input ──► CABLE Output ──┬──► Discord mic (friends)
-                                                  │
-                                                  └──► OBS Audio Capture (viewers)
-```
+*[Stream clip placeholder]*
 
-## 📺 OBS Setup (for streamers)
-
-1. In OBS, add **Audio Input Capture** source
-2. Select **CABLE Output (VB-Audio Virtual Cable)**
-3. In Advanced Audio Properties → set this source to **Monitor Off** (so you don't hear echo)
-4. Route to **Stream** only → viewers hear sounds, you don't get doubled audio
-
-## 🔧 VB-CABLE Silent Install (for deployment)
-
-```
-VBCABLE_Setup_x64.exe /S
-```
-
-## 🎬 Demo
-
-*[Your stream clip here]*
-
-## 📄 License
+## License
 
 MIT

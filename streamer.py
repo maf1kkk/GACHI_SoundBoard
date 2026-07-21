@@ -40,10 +40,24 @@ if FFMPEG:
 
 WAV_CACHE = Path(tempfile.gettempdir())/"sndb_cache"
 WAV_CACHE.mkdir(exist_ok=True)
+SD_LOG = Path(tempfile.gettempdir())/"sndb_debug.log"
+
+def log_sd(msg):
+    try:
+        with open(SD_LOG,"a",encoding="utf-8") as f: f.write(f"{msg}\n")
+    except: pass
 
 def list_output_devs():
     if not HAS_SD: return []
-    try: return [(i,d["name"]) for i,d in enumerate(sd.query_devices()) if d["max_output_channels"]>0]
+    try:
+        seen=set(); out=[]
+        for i,d in enumerate(sd.query_devices()):
+            if d["max_output_channels"]>0:
+                n=d["name"]
+                key=n.strip().rstrip("C ")
+                if key not in seen:
+                    seen.add(key); out.append((i,n))
+        return out
     except: return []
 
 def find_cable():
@@ -69,19 +83,25 @@ def play_sound(fp, vol=80, device=None, gain=200):
         def _p():
             try:
                 w = _to_wav(fp)
-                if not w: return
+                if not w:
+                    log_sd(f"wav conv failed: {fp}")
+                    return
                 d, sr = sf.read(w)
-                gain_f = max(0.5, min(5.0, gain/100))
-                d = d * gain_f * (vol/100)
-                mx = max(abs(d)) or 1
+                gain_f = max(0.5, min(5.0, gain/100)) * (vol/100)
+                d = d * gain_f
+                mx = float(abs(d).max()) or 1.0
                 if mx > 1.0: d = d / mx
-                for i,n in list_output_devs():
+                devs = list_output_devs()
+                for i,n in devs:
                     if n==device:
                         with _sd_stream_lock:
                             sd.stop()
-                            sd.play(d,sr,device=i)
+                            sd.play(d, sr, device=i)
+                        log_sd(f"played '{Path(fp).name}' -> '{n}' idx={i}")
                         return
-            except: pass
+                log_sd(f"device '{device}' not found in: {[x[1] for x in devs]}")
+            except Exception as e:
+                log_sd(f"ERR: {e}")
         threading.Thread(target=_p,daemon=True).start()
     with alias_lock:
         alias_counter+=1; a=f"p{alias_counter%99999}"
