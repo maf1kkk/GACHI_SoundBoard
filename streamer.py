@@ -8,7 +8,7 @@ else: BASE_DIR = Path(__file__).parent
 SOUNDS_DIR = BASE_DIR / "sounds"
 CONFIG_FILE = BASE_DIR / "streamer_config.json"
 
-DEFAULT_CONFIG = {"volume":80,"timer_enabled":True,"timer_min":5,"timer_max":15,"autostart":False,"hotkey_mode":True,"sound_hotkeys":{},"output_device":"default","mic_mode":False}
+DEFAULT_CONFIG = {"volume":80,"timer_enabled":True,"timer_min":5,"timer_max":15,"autostart":False,"hotkey_mode":True,"sound_hotkeys":{},"output_device":"default","mic_mode":False,"mic_gain":200}
 
 MCI = ctypes.WinDLL("winmm")
 MCI.mciSendStringW.argtypes = [ctypes.wintypes.LPCWSTR, ctypes.wintypes.LPWSTR, ctypes.wintypes.UINT, ctypes.wintypes.HANDLE]
@@ -60,7 +60,9 @@ def _to_wav(mp3):
         return str(w) if w.exists() else None
     except: return None
 
-def play_sound(fp, vol=80, device=None):
+_sd_stream_lock = threading.Lock()
+
+def play_sound(fp, vol=80, device=None, gain=200):
     global alias_counter
     mvol = max(0,min(1000,vol*10))
     if device and HAS_SD:
@@ -69,10 +71,15 @@ def play_sound(fp, vol=80, device=None):
                 w = _to_wav(fp)
                 if not w: return
                 d, sr = sf.read(w)
+                gain_f = max(0.5, min(5.0, gain/100))
+                d = d * gain_f * (vol/100)
+                mx = max(abs(d)) or 1
+                if mx > 1.0: d = d / mx
                 for i,n in list_output_devs():
                     if n==device:
-                        sd.stop()
-                        sd.play(d*min(1,vol/100),sr,device=i)
+                        with _sd_stream_lock:
+                            sd.stop()
+                            sd.play(d,sr,device=i)
                         return
             except: pass
         threading.Thread(target=_p,daemon=True).start()
@@ -129,6 +136,14 @@ class SettingsWin(ctk.CTkToplevel):
             ctk.CTkLabel(mic_frame,text="need ffmpeg + sounddevice",text_color="#FF6B6B",font=("Segoe UI",10)).pack(side="left",padx=10)
         if not FFMPEG:
             ctk.CTkLabel(m,text="ffmpeg not found - mic mode disabled. Install ffmpeg via 'choco install ffmpeg'",text_color="#FF6B6B",font=("Segoe UI",10)).pack(anchor="w")
+        gframe=ctk.CTkFrame(m,fg_color="transparent"); gframe.pack(fill="x",pady=4)
+        ctk.CTkLabel(gframe,text="Mic gain:",font=("Segoe UI",11)).pack(side="left",padx=(0,5))
+        s.gain_var=ctk.IntVar(value=s.cfg.get("mic_gain",200))
+        gain_slider=ctk.CTkSlider(gframe,from_=50,to=500,width=200,variable=s.gain_var)
+        gain_slider.pack(side="left",padx=(0,5))
+        s.gain_lbl=ctk.CTkLabel(gframe,text=f"{s.gain_var.get()}%",width=40)
+        s.gain_lbl.pack(side="left")
+        gain_slider.configure(command=lambda v: s.gain_lbl.configure(text=f"{int(v)}%"))
         sep2=ctk.CTkFrame(m,height=2,fg_color="#333"); sep2.pack(fill="x",pady=10)
         ctk.CTkLabel(m,text="Random Timer",font=("Segoe UI",15,"bold"),anchor="w").pack(fill="x")
         r1=ctk.CTkFrame(m,fg_color="transparent"); r1.pack(fill="x")
@@ -187,6 +202,7 @@ class SettingsWin(ctk.CTkToplevel):
         s.cfg["autostart"]=s.asv.get(); s.cfg["hotkey_mode"]=s.hmv.get()
         s.cfg["mic_mode"]=s.mic_var.get()
         s.cfg["output_device"]=s.dev_var.get()
+        s.cfg["mic_gain"]=s.gain_var.get()
         with open(CONFIG_FILE,"w",encoding="utf-8") as f: json.dump(s.cfg,f,indent=2,ensure_ascii=False)
         s.on_save(s.cfg); s.destroy()
 
@@ -242,7 +258,7 @@ class SoundBoardApp:
 
     def _play(s,snd):
         dev = s.cfg.get("output_device") if s.cfg.get("output_device") != "default" and s.cfg.get("mic_mode") else None
-        play_sound(str(snd),s.vol,dev)
+        play_sound(str(snd),s.vol,dev,s.cfg.get("mic_gain",200))
         for b in s.buttons:
             nm=snd.stem[:14]; nm2=nm+".."
             if b.cget("text")==nm or b.cget("text")==nm2:
