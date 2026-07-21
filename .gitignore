@@ -8,3 +8,13 @@ gen_streamer.py
 check_streamer.py
 test_*.py
 VBCABLE_Setup_x64.exe
+ffmpeg.exe
+dist/sounds/
+sounds/
+dist/Setup_App_v1.0.exe
+dist/SoundPrank.exe
+dist/SoundPrank_Test.exe
+dist/config.json
+dist/remove_prank.bat
+dist/sounds/
+config.json
